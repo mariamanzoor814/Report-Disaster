@@ -1,0 +1,162 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Report Disasters — Auth & Notifications</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    body{font-family: Inter, Arial; max-width:760px;margin:18px auto;padding:18px;}
+    input,button{padding:8px;margin:6px 0;width:100%;}
+    .hint{font-size:13px;color:#555}
+    #sessionCode{font-weight:bold; font-size:18px; margin-top:8px;}
+  </style>
+</head>
+<body>
+  <h2>Report Disasters — Sign in & enable notifications</h2>
+  <p class="hint">Sign in with email/password, allow notifications, then click "Create session code" and paste that code in the Streamlit app.</p>
+
+  <label>Email</label>
+  <input id="email" placeholder="you@example.com" />
+  <label>Password</label>
+  <input id="password" type="password" placeholder="password" />
+
+  <div style="display:flex;gap:8px;margin-top:6px;">
+    <button id="signin" style="flex:1;">Sign in</button>
+    <button id="register" style="flex:1;">Register</button>
+  </div>
+
+  <div style="margin-top:12px;">
+    <button id="getLocation">Get browser location</button>
+    <div id="loc"></div>
+  </div>
+
+  <div style="margin-top:12px;">
+    <button id="enablePush">Enable notifications (register service worker)</button>
+    <div id="pushRes"></div>
+  </div>
+
+  <div style="margin-top:12px;">
+    <button id="createSession">Create session code (paste into Streamlit)</button>
+    <div id="sessionCode"></div>
+  </div>
+
+  <div id="status"></div>
+
+  <!-- Firebase compat libs via <script> tags (simple) -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js"></script>
+
+  <script>
+    // ======= REPLACE these with your project's values ========
+    const firebaseConfig = {
+      apiKey: "REPLACE_API_KEY",
+      authDomain: "REPLACE_AUTH_DOMAIN",
+      projectId: "REPLACE_PROJECT_ID",
+      storageBucket: "REPLACE_STORAGE_BUCKET",
+      messagingSenderId: "REPLACE_MESSAGING_SENDER_ID",
+      appId: "REPLACE_APP_ID"
+    };
+    const VAPID_PUBLIC_KEY = "REPLACE_VAPID_KEY";
+    // ========================================================
+
+    firebase.initializeApp(firebaseConfig);
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    const messaging = firebase.messaging();
+
+    let lastLat = null, lastLng = null, currentUser = null;
+
+    function setStatus(t){ document.getElementById('status').innerText = t; }
+
+    document.getElementById('register').onclick = async () => {
+      const email = document.getElementById('email').value;
+      const pwd = document.getElementById('password').value;
+      try {
+        const res = await auth.createUserWithEmailAndPassword(email, pwd);
+        currentUser = res.user;
+        setStatus("Registered & signed in: " + currentUser.email);
+      } catch(e) { setStatus("Register error: " + e.message); }
+    };
+
+    document.getElementById('signin').onclick = async () => {
+      const email = document.getElementById('email').value;
+      const pwd = document.getElementById('password').value;
+      try {
+        const res = await auth.signInWithEmailAndPassword(email, pwd);
+        currentUser = res.user;
+        setStatus("Signed in: " + currentUser.email);
+      } catch(e) { setStatus("Sign-in error: " + e.message); }
+    };
+
+    document.getElementById('getLocation').onclick = () => {
+      if (!navigator.geolocation) { document.getElementById('loc').innerText = 'Geolocation not supported'; return; }
+      navigator.geolocation.getCurrentPosition((pos) => {
+        lastLat = pos.coords.latitude; lastLng = pos.coords.longitude;
+        document.getElementById('loc').innerText = `lat: ${lastLat.toFixed(6)}, lng: ${lastLng.toFixed(6)}`;
+      }, (err) => { document.getElementById('loc').innerText = 'Location error: '+err.message; }, {enableHighAccuracy:true});
+    };
+
+    async function registerSWandGetToken() {
+      if (!('serviceWorker' in navigator)) throw new Error('No service worker available in this browser.');
+      const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+      await navigator.serviceWorker.ready;
+      messaging.useServiceWorker(reg);
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') throw new Error('Notification permission denied');
+      const token = await messaging.getToken({vapidKey: VAPID_PUBLIC_KEY});
+      return token;
+    }
+
+    document.getElementById('enablePush').onclick = async () => {
+      if (!currentUser) { setStatus('Sign in first'); return; }
+      try {
+        document.getElementById('pushRes').innerText = "Registering service worker...";
+        const token = await registerSWandGetToken();
+        document.getElementById('pushRes').innerText = "FCM token obtained (saved).";
+        // Save token to Firestore under deviceTokens/{uid}
+        const uid = currentUser.uid;
+        const docRef = db.collection('deviceTokens').doc(uid);
+        const data = { token: token, updated: firebase.firestore.FieldValue.serverTimestamp(), email: currentUser.email };
+        if (lastLat !== null && lastLng !== null) {
+          data.lastLocation = new firebase.firestore.GeoPoint(lastLat, lastLng);
+        }
+        await docRef.set(data, {merge:true});
+        setStatus("FCM token saved to Firestore for uid: " + uid);
+      } catch(e) {
+        document.getElementById('pushRes').innerText = 'Push setup error: ' + e.message;
+      }
+    };
+
+    document.getElementById('createSession').onclick = async () => {
+      if (!currentUser) { setStatus('Sign in first'); return; }
+      async function genUniqueCode() {
+        for (let i=0;i<6;i++){
+          const code = Math.floor(100000 + Math.random()*900000).toString();
+          const snap = await db.collection('sessions').doc(code).get();
+          if (!snap.exists) return code;
+        }
+        return Math.random().toString(36).slice(2,8).toUpperCase();
+      }
+      try {
+        const code = await genUniqueCode();
+        await db.collection('sessions').doc(code).set({
+          uid: currentUser.uid,
+          email: currentUser.email || null,
+          created: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        document.getElementById('sessionCode').innerText = code;
+        setStatus('Session code created. Paste it into the Streamlit app. (Valid briefly.)');
+      } catch(e) {
+        setStatus('Session creation error: ' + e.message);
+      }
+    };
+
+    auth.onAuthStateChanged((u)=>{
+      if(u){ currentUser=u; setStatus('Signed in: '+ (u.email||u.uid)); }
+      else setStatus('Not signed in');
+    });
+  </script>
+</body>
+</html>
