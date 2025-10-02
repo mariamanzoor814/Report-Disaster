@@ -1,4 +1,4 @@
-// firebase-messaging-sw.js
+// report-disaster/hosting/firebase-messaging-sw.js
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js');
 importScripts('https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js');
 
@@ -12,13 +12,14 @@ const firebaseConfig = {
   measurementId: "G-N19ZTE6961"
 };
 firebase.initializeApp(firebaseConfig);
+
 const messaging = firebase.messaging();
 
-messaging.onBackgroundMessage(function(payload) {
+messaging.onBackgroundMessage(payload => {
   const title = payload.notification?.title || 'New report';
-  const options = {
-    body: payload.notification?.body || '',
-    icon: payload.notification?.icon || '/favicon.ico'
+  const options = { 
+    body: payload.notification?.body || '', 
+    icon: payload.notification?.icon || '/favicon.ico' 
   };
   self.registration.showNotification(title, options);
 });

@@ -1,4 +1,4 @@
-# app.py
+# report-disaster/app.py
 import streamlit as st
 import json, uuid
 from datetime import datetime, timezone, timedelta
@@ -86,31 +86,23 @@ def remove_device_token(token):
             pass
 
 def send_push_and_cleanup(tokens, title, body, data_payload=None):
-    if not tokens:
-        return {"sent":0, "failed":0}
     total_sent = 0
     total_failed = 0
-    for i in range(0, len(tokens), 500):
-        batch = tokens[i:i+500]
-        message = messaging.MulticastMessage(
+    for token in tokens:
+        message = messaging.Message(
             notification=messaging.Notification(title=title, body=body),
-            tokens=batch,
+            token=token,
             data=data_payload or {}
         )
-        resp = messaging.send_multicast(message)
-        total_sent += resp.success_count
-        total_failed += resp.failure_count
-        # cleanup invalid tokens
-        for idx, send_resp in enumerate(resp.responses):
-            if not send_resp.success:
-                token = batch[idx]
-                # remove token(s) with clear invalid errors
-                err = getattr(send_resp, "exception", None)
-                if err:
-                    err_str = str(err)
-                    if "NotRegistered" in err_str or "registration-token-not-registered" in err_str or "InvalidRegistration" in err_str:
-                        remove_device_token(token)
+        try:
+            messaging.send(message)
+            total_sent += 1
+        except Exception as e:
+            total_failed += 1
+            if "NotRegistered" in str(e) or "InvalidRegistration" in str(e):
+                remove_device_token(token)
     return {"sent": total_sent, "failed": total_failed}
+
 
 # ---------------- UI ----------------
 st.markdown("### Step 1 — Link your device via the hosted auth & push page")

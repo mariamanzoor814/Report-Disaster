@@ -1,3 +1,4 @@
+<!-- report-disaster/hosting/index.html -->
 <!doctype html>
 <html>
 <head>
@@ -5,15 +6,15 @@
   <title>Report Disasters — Auth & Notifications</title>
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    body{font-family: Inter, Arial; max-width:760px;margin:18px auto;padding:18px;}
-    input,button{padding:8px;margin:6px 0;width:100%;}
-    .hint{font-size:13px;color:#555}
-    #sessionCode{font-weight:bold; font-size:18px; margin-top:8px;}
+    body { font-family: Inter, Arial; max-width:760px; margin:18px auto; padding:18px; }
+    input, button { padding:8px; margin:6px 0; width:100%; }
+    .hint { font-size:13px; color:#555; }
+    #status { margin-top:12px; font-weight:bold; }
   </style>
 </head>
 <body>
   <h2>Report Disasters — Sign in & enable notifications</h2>
-  <p class="hint">Sign in with email/password, allow notifications, then click "Create session code" and paste that code in the Streamlit app.</p>
+  <p class="hint">Login or register to receive push notifications. Optionally share your location.</p>
 
   <label>Email</label>
   <input id="email" placeholder="you@example.com" />
@@ -26,137 +27,105 @@
   </div>
 
   <div style="margin-top:12px;">
-    <button id="getLocation">Get browser location</button>
+    <label><input type="checkbox" id="shareLocation"> Share my location</label>
     <div id="loc"></div>
   </div>
 
   <div style="margin-top:12px;">
-    <button id="enablePush">Enable notifications (register service worker)</button>
-    <div id="pushRes"></div>
-  </div>
-
-  <div style="margin-top:12px;">
-    <button id="createSession">Create session code (paste into Streamlit)</button>
-    <div id="sessionCode"></div>
+    <button id="enablePush">Enable notifications</button>
   </div>
 
   <div id="status"></div>
 
-  <!-- Firebase compat libs via <script> tags (simple) -->
+  <!-- Firebase JS SDK -->
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js"></script>
 
   <script>
-    // ======= REPLACE these with your project's values ========
     const firebaseConfig = {
-      apiKey: "REPLACE_API_KEY",
-      authDomain: "REPLACE_AUTH_DOMAIN",
-      projectId: "REPLACE_PROJECT_ID",
-      storageBucket: "REPLACE_STORAGE_BUCKET",
-      messagingSenderId: "REPLACE_MESSAGING_SENDER_ID",
-      appId: "REPLACE_APP_ID"
+      apiKey: "AIzaSyCcfgV1aIVFAFLsXrKarFTT3hTarsIy8ao",
+      authDomain: "report-disasters.firebaseapp.com",
+      projectId: "report-disasters",
+      storageBucket: "report-disasters.firebasestorage.app",
+      messagingSenderId: "194910232971",
+      appId: "1:194910232971:web:bf7aacf7ed7dbf73f68f8e",
+      measurementId: "G-N19ZTE6961"
     };
-    const VAPID_PUBLIC_KEY = "REPLACE_VAPID_KEY";
-    // ========================================================
+    const VAPID_PUBLIC_KEY = "BGowQert-uPDmiMt_JRhRQxXYOD1MYGAu3a4YngUt_UcGIb2a90okhcrbz2T4Ve0qycgrXrq09GP-twZfg8r4a8";
 
     firebase.initializeApp(firebaseConfig);
     const auth = firebase.auth();
     const db = firebase.firestore();
     const messaging = firebase.messaging();
 
-    let lastLat = null, lastLng = null, currentUser = null;
+    let currentUser = null;
+    let lastLat = null, lastLng = null;
 
-    function setStatus(t){ document.getElementById('status').innerText = t; }
+    function setStatus(msg) { document.getElementById('status').innerText = msg; }
 
+    // ---------------- Login / Register ----------------
     document.getElementById('register').onclick = async () => {
-      const email = document.getElementById('email').value;
-      const pwd = document.getElementById('password').value;
       try {
-        const res = await auth.createUserWithEmailAndPassword(email, pwd);
+        const res = await auth.createUserWithEmailAndPassword(
+          document.getElementById('email').value,
+          document.getElementById('password').value
+        );
         currentUser = res.user;
         setStatus("Registered & signed in: " + currentUser.email);
       } catch(e) { setStatus("Register error: " + e.message); }
     };
 
     document.getElementById('signin').onclick = async () => {
-      const email = document.getElementById('email').value;
-      const pwd = document.getElementById('password').value;
       try {
-        const res = await auth.signInWithEmailAndPassword(email, pwd);
+        const res = await auth.signInWithEmailAndPassword(
+          document.getElementById('email').value,
+          document.getElementById('password').value
+        );
         currentUser = res.user;
         setStatus("Signed in: " + currentUser.email);
       } catch(e) { setStatus("Sign-in error: " + e.message); }
     };
 
-    document.getElementById('getLocation').onclick = () => {
-      if (!navigator.geolocation) { document.getElementById('loc').innerText = 'Geolocation not supported'; return; }
-      navigator.geolocation.getCurrentPosition((pos) => {
-        lastLat = pos.coords.latitude; lastLng = pos.coords.longitude;
-        document.getElementById('loc').innerText = `lat: ${lastLat.toFixed(6)}, lng: ${lastLng.toFixed(6)}`;
-      }, (err) => { document.getElementById('loc').innerText = 'Location error: '+err.message; }, {enableHighAccuracy:true});
-    };
-
-    async function registerSWandGetToken() {
-      if (!('serviceWorker' in navigator)) throw new Error('No service worker available in this browser.');
-      const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
-      await navigator.serviceWorker.ready;
-      messaging.useServiceWorker(reg);
-      const permission = await Notification.requestPermission();
-      if (permission !== 'granted') throw new Error('Notification permission denied');
-      const token = await messaging.getToken({vapidKey: VAPID_PUBLIC_KEY});
-      return token;
+    // ---------------- Location ----------------
+    async function getLocation() {
+      if (!navigator.geolocation) return null;
+      return new Promise(res => navigator.geolocation.getCurrentPosition(
+        pos => res(pos.coords),
+        () => res(null),
+        { enableHighAccuracy:true }
+      ));
     }
 
-    document.getElementById('enablePush').onclick = async () => {
-      if (!currentUser) { setStatus('Sign in first'); return; }
-      try {
-        document.getElementById('pushRes').innerText = "Registering service worker...";
-        const token = await registerSWandGetToken();
-        document.getElementById('pushRes').innerText = "FCM token obtained (saved).";
-        // Save token to Firestore under deviceTokens/{uid}
-        const uid = currentUser.uid;
-        const docRef = db.collection('deviceTokens').doc(uid);
-        const data = { token: token, updated: firebase.firestore.FieldValue.serverTimestamp(), email: currentUser.email };
-        if (lastLat !== null && lastLng !== null) {
-          data.lastLocation = new firebase.firestore.GeoPoint(lastLat, lastLng);
-        }
-        await docRef.set(data, {merge:true});
-        setStatus("FCM token saved to Firestore for uid: " + uid);
-      } catch(e) {
-        document.getElementById('pushRes').innerText = 'Push setup error: ' + e.message;
-      }
-    };
+    // ---------------- Push ----------------
+    async function enablePush() {
+      if (!currentUser) { setStatus("Sign in first."); return; }
 
-    document.getElementById('createSession').onclick = async () => {
-      if (!currentUser) { setStatus('Sign in first'); return; }
-      async function genUniqueCode() {
-        for (let i=0;i<6;i++){
-          const code = Math.floor(100000 + Math.random()*900000).toString();
-          const snap = await db.collection('sessions').doc(code).get();
-          if (!snap.exists) return code;
-        }
-        return Math.random().toString(36).slice(2,8).toUpperCase();
-      }
       try {
-        const code = await genUniqueCode();
-        await db.collection('sessions').doc(code).set({
-          uid: currentUser.uid,
-          email: currentUser.email || null,
-          created: firebase.firestore.FieldValue.serverTimestamp()
-        });
-        document.getElementById('sessionCode').innerText = code;
-        setStatus('Session code created. Paste it into the Streamlit app. (Valid briefly.)');
-      } catch(e) {
-        setStatus('Session creation error: ' + e.message);
-      }
-    };
+        // optional location
+        if (document.getElementById('shareLocation').checked) {
+          const coords = await getLocation();
+          if (coords) { lastLat = coords.latitude; lastLng = coords.longitude; }
+        }
 
-    auth.onAuthStateChanged((u)=>{
-      if(u){ currentUser=u; setStatus('Signed in: '+ (u.email||u.uid)); }
-      else setStatus('Not signed in');
-    });
+        // register SW and get FCM token
+        const reg = await navigator.serviceWorker.register('/firebase-messaging-sw.js');
+        const token = await messaging.getToken({ vapidKey: VAPID_PUBLIC_KEY, serviceWorkerRegistration: reg });
+
+        // save token & optional location to Firestore
+        const docRef = db.collection("deviceTokens").doc(currentUser.uid);
+        const data = { token, email: currentUser.email, updated: firebase.firestore.FieldValue.serverTimestamp() };
+        if (lastLat && lastLng) data.lastLocation = new firebase.firestore.GeoPoint(lastLat, lastLng);
+        await docRef.set(data, { merge: true });
+
+        setStatus("Notifications enabled! Token saved.");
+      } catch(e) { setStatus("Push setup error: " + e.message); }
+    }
+
+    document.getElementById('enablePush').onclick = enablePush;
+
+    auth.onAuthStateChanged(u => { if(u) currentUser = u; });
   </script>
 </body>
 </html>
