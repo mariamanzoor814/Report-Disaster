@@ -119,19 +119,19 @@ def set_user_home_location(email, lat, lng):
     except Exception:
         pass
 
-def reverse_geocode(lat, lng):
-    try:
-        geolocator = Nominatim(user_agent="report-disasters")
-        loc = geolocator.reverse((lat, lng), timeout=10, language="en", addressdetails=True)
-        if loc and loc.raw:
-            addr = loc.raw.get("address", {})
-            country = addr.get("country")
-            region = addr.get("state") or addr.get("region") or addr.get("county")
-            display = loc.address
-            return country, region, display
-    except Exception:
-        return None, None, None
-    return None, None, None
+# def reverse_geocode(lat, lng):
+#     try:
+#         geolocator = Nominatim(user_agent="report-disasters")
+#         loc = geolocator.reverse((lat, lng), timeout=10, language="en", addressdetails=True)
+#         if loc and loc.raw:
+#             addr = loc.raw.get("address", {})
+#             country = addr.get("country")
+#             region = addr.get("state") or addr.get("region") or addr.get("county")
+#             display = loc.address
+#             return country, region, display
+#     except Exception:
+#         return None, None, None
+#     return None, None, None
 
 def save_incident(uid_email, username, inc_type, description, lat, lng, level="Normal", photo_bytes=None, photo_name=None):
     created_ms = int(time.time()*1000)
@@ -162,18 +162,136 @@ def save_incident(uid_email, username, inc_type, description, lat, lng, level="N
             doc["photo_url"] = None
     db.collection(INCIDENTS_COLLECTION).add(doc)
 
-def geocode_address(q):
-    if not q: return None
-    try:
-        geolocator = Nominatim(user_agent="report-disasters")
-        r = geolocator.geocode(q, timeout=10)
-        if r:
-            return r.latitude, r.longitude, r.address
-    except GeocoderTimedOut:
+import time
+import traceback
+import requests
+import streamlit as st
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
+
+# ----- Robust OpenCage + Nominatim wrapper -----
+def _geocode_opencage(q, api_key, max_retries=2):
+    if not api_key:
         return None
-    except Exception:
-        return None
+    url = "https://api.opencagedata.com/geocode/v1/json"
+    params = {"q": q, "key": api_key, "limit": 1, "no_annotations": 1}
+    backoff = 1.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            r = requests.get(url, params=params, timeout=8)
+            if r.status_code == 200:
+                j = r.json()
+                if j.get("results"):
+                    res = j["results"][0]
+                    lat = res["geometry"]["lat"]
+                    lng = res["geometry"]["lng"]
+                    formatted = res.get("formatted") or ""
+                    return lat, lng, formatted
+                return None
+            else:
+                st.warning(f"OpenCage returned {r.status_code} (attempt {attempt})")
+        except Exception as e:
+            st.warning(f"OpenCage network error (attempt {attempt}): {e}")
+        time.sleep(backoff)
+        backoff *= 2
     return None
+
+def _geocode_nominatim(q, user_agent_contact, max_retries=3):
+    # user_agent must include contact per Nominatim policy
+    contact = user_agent_contact or "report-disasters (no-contact@example.com)"
+    ua = f"report-disasters ({contact})"
+    geolocator = Nominatim(user_agent=ua, timeout=15)
+
+    backoff = 1.0
+    for attempt in range(1, max_retries + 1):
+        try:
+            res = geolocator.geocode(q, addressdetails=False, exactly_one=True)
+            if res:
+                return res.latitude, res.longitude, res.address
+            # no result — return None (no need to retry)
+            return None
+        except GeocoderTimedOut:
+            st.warning(f"Nominatim timeout for '{q}' (attempt {attempt}) — retrying...")
+        except GeocoderServiceError as e:
+            st.error(f"Nominatim service error: {e}")
+            st.write(traceback.format_exc())
+            return None
+        except Exception as e:
+            st.error(f"Unexpected geocoding error: {e}")
+            st.write(traceback.format_exc())
+            return None
+        time.sleep(backoff)
+        backoff *= 2
+    st.error(f"Geocoding failed after {max_retries} attempts for '{q}'.")
+    return None
+
+def geocode_address(q):
+    """
+    Drop-in replacement for your original geocode_address.
+    Returns (lat, lng, address) or None.
+    Prefers OPENCAGE_KEY if present in st.secrets, otherwise uses Nominatim.
+    """
+    if not q:
+        return None
+
+    # 1) Try OpenCage if API key present
+    try:
+        opencage_key = None
+        # Use st.secrets safely (works on local and Streamlit Cloud)
+        opencage_key = st.secrets.get("OPENCAGE_KEY") or st.secrets.get("opencage_key")
+    except Exception:
+        opencage_key = None
+
+    if opencage_key:
+        try:
+            res = _geocode_opencage(q, api_key=opencage_key)
+            if res:
+                return res
+        except Exception as e:
+            st.warning(f"OpenCage fallback error: {e}")
+
+    # 2) Fallback to Nominatim with contact from secrets
+    try:
+        contact = st.secrets.get("geocoder_contact") or st.secrets.get("GEOCODER_CONTACT")
+    except Exception:
+        contact = None
+
+    return _geocode_nominatim(q, user_agent_contact=contact)
+
+
+# Improved reverse_geocode (use same user_agent + retries)
+def reverse_geocode(lat, lng):
+    try:
+        contact = None
+        try:
+            contact = st.secrets.get("geocoder_contact") or st.secrets.get("GEOCODER_CONTACT")
+        except Exception:
+            contact = None
+        contact = contact or "report-disasters (no-contact@example.com)"
+        ua = f"report-disasters ({contact})"
+        geolocator = Nominatim(user_agent=ua, timeout=15)
+        backoff = 1.0
+        for attempt in range(1, 4):
+            try:
+                loc = geolocator.reverse((lat, lng), timeout=10, language="en", addressdetails=True)
+                if loc and loc.raw:
+                    addr = loc.raw.get("address", {})
+                    country = addr.get("country")
+                    region = addr.get("state") or addr.get("region") or addr.get("county")
+                    display = loc.address
+                    return country, region, display
+                return None, None, None
+            except GeocoderTimedOut:
+                st.warning(f"Nominatim reverse timeout (attempt {attempt}) — retrying...")
+            except Exception as e:
+                st.error(f"Reverse geocoding error: {e}")
+                st.write(traceback.format_exc())
+                return None, None, None
+            time.sleep(backoff)
+            backoff *= 2
+    except Exception:
+        return None, None, None
+    return None, None, None
 
 def haversine(lat1, lon1, lat2, lon2):
     R = 6371.0
@@ -1053,18 +1171,54 @@ def page_dashboard():
             else:
                 try:
                     photo_bytes = photo.getvalue() if photo else None
-                    save_incident(st.session_state.user["email"], st.session_state.user["username"], inc_title, description or "", lat, lng, level, photo_bytes, getattr(photo, "name", None))
+
+                    # Save the incident to Firestore
+                    save_incident(
+                        st.session_state.user["email"],
+                        st.session_state.user["username"],
+                        inc_title,
+                        description or "",
+                        lat, lng,
+                        level,
+                        photo_bytes,
+                        getattr(photo, "name", None)
+                    )
+
+                    # Immediate UI feedback
                     st.success("Report submitted — thank you.")
+
+                    # (1) Send an immediate browser notification for this submission
+                    try:
+                        _send_browser_notifications([{
+                            "title": f"Report submitted: {inc_title}",
+                            "body": (description or "")[:200],
+                            "level": level
+                        }])
+                    except Exception as e:
+                        # don't block the flow on notify failure; log small warning for debugging
+                        st.warning(f"Notification call failed: {e}")
+
+                    # (2) Update Firestore user's last_seen_ms so this user won't be treated as having "missed" their own report later
+                    try:
+                        set_user_last_seen(st.session_state.user["email"], int(time.time()*1000))
+                    except Exception:
+                        pass
+
+                    # (3) Clear feed + map caches so Feed / map will re-fetch and show the new report
+                    st.session_state["_inc_feed"] = None
+                    st.session_state["_inc_cache"] = {"ts": 0, "params": None, "data": None}
+                    st.session_state.map_markers_loaded = False
+
+                    # clear selection and navigate to feed
                     st.session_state.last_seen_ms = int(time.time()*1000)
                     st.session_state.selected_lat = None
                     st.session_state.selected_lng = None
-                    st.session_state["_inc_cache"] = {"ts": 0, "params": None, "data": None}
-                    st.session_state.feed_loaded = False
-                    st.session_state.map_markers_loaded = False
                     st.session_state.page = "feed"
                     st.rerun()
+
                 except Exception as e:
                     st.error("Submit failed: " + str(e))
+
         if c2.button("Report Feed"):
             st.session_state.page = "feed"
             st.rerun()

@@ -6,3 +6,4 @@ folium
 geopy
 streamlit-autorefresh
 streamlit-option-menu
+streamlit_folium
