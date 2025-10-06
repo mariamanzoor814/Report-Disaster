@@ -1,9 +1,7 @@
-import json
+import json, toml
 
-with open("serviceAccount.json", "r") as f:
+with open("serviceAccount.json") as f:
     data = json.load(f)
 
-# Dumps to single line string with \n properly escaped
-escaped = json.dumps(data)
-
-print('FIREBASE_SERVICE_ACCOUNT = """' + escaped + '"""')
+with open(".streamlit/secrets.toml", "w") as f:
+    toml.dump({"FIREBASE_SERVICE_ACCOUNT": data}, f)

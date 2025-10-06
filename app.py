@@ -27,19 +27,28 @@ except Exception:
 st.set_page_config(page_title="Report Disasters", layout="wide", initial_sidebar_state="collapsed")
 
 # ---------- Firebase init ----------
-SERVICE_ACCOUNT_PATH = "serviceAccount.json"
-if not os.path.exists(SERVICE_ACCOUNT_PATH):
-    st.error("Missing serviceAccount.json in app folder. Put your Firebase Admin serviceAccount JSON file here.")
-    st.stop()
-
-if not firebase_admin._apps:
-    cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
-    firebase_admin.initialize_app(cred)
-db = firestore.client()
 try:
-    bucket = storage.bucket()
-except Exception:
-    bucket = None
+    if not firebase_admin._apps:
+        if "serviceAccount" in st.secrets:  # ✅ For Streamlit Cloud
+            cred = credentials.Certificate(dict(st.secrets["serviceAccount"]))
+            firebase_admin.initialize_app(cred)
+        # else:  # ✅ Local fallback (for dev)
+        #     SERVICE_ACCOUNT_PATH = "serviceAccount.json"
+        #     if not os.path.exists(SERVICE_ACCOUNT_PATH):
+        #         st.error("Missing serviceAccount.json or [serviceAccount] in secrets.toml")
+        #         st.stop()
+        #     cred = credentials.Certificate(SERVICE_ACCOUNT_PATH)
+        #     firebase_admin.initialize_app(cred)
+
+    db = firestore.client()
+    try:
+        bucket = storage.bucket()
+    except Exception:
+        bucket = None
+
+except Exception as e:
+    st.error(f"🔥 Firebase initialization failed: {e}")
+    st.stop()
 
 USERS_COLLECTION = "app_users"
 INCIDENTS_COLLECTION = "incidents"
