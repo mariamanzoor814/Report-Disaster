@@ -2,7 +2,7 @@
 
 **Author:** Maria Manzoor  
 **Framework:** Streamlit + Firebase  
-**Deployment:** Streamlit Cloud & Firebase Cloud
+**Deployment:** Streamlit Cloud & Firebase Cloud = https://mariamanzoor814-report-disaster-app-es4t64.streamlit.app/
 
 ---
 
