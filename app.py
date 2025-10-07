@@ -1141,24 +1141,24 @@ def page_dashboard():
             else:
                 st.error("Enter search text.")
 
-        detect_html = """
-        <button id="detectBtn" style="padding:8px 12px;border-radius:8px;border:none;background:#0b66ff;color:white;font-weight:700;cursor:pointer">Detect my location</button>
-        <script>
-        const b = document.getElementById('detectBtn');
-        b.addEventListener('click', function(){
-            if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
-            navigator.geolocation.getCurrentPosition(function(p){
-                var lat = p.coords.latitude;
-                var lng = p.coords.longitude;
-                var base = window.location.protocol + "//" + window.location.host + window.location.pathname;
-                window.location.replace(base + '?lat=' + encodeURIComponent(lat) + '&lng=' + encodeURIComponent(lng) + '&setPage=dashboard');
-            }, function(err){
-                alert('Location error: ' + (err && err.message ? err.message : err.code));
-            }, { enableHighAccuracy:true, timeout:15000 });
-        });
-        </script>
-        """
-        st.components.v1.html(detect_html, height=48)
+        # detect_html = """
+        # <button id="detectBtn" style="padding:8px 12px;border-radius:8px;border:none;background:#0b66ff;color:white;font-weight:700;cursor:pointer">Detect my location</button>
+        # <script>
+        # const b = document.getElementById('detectBtn');
+        # b.addEventListener('click', function(){
+        #     if (!navigator.geolocation) { alert('Geolocation not supported'); return; }
+        #     navigator.geolocation.getCurrentPosition(function(p){
+        #         var lat = p.coords.latitude;
+        #         var lng = p.coords.longitude;
+        #         var base = window.location.protocol + "//" + window.location.host + window.location.pathname;
+        #         window.location.replace(base + '?lat=' + encodeURIComponent(lat) + '&lng=' + encodeURIComponent(lng) + '&setPage=dashboard');
+        #     }, function(err){
+        #         alert('Location error: ' + (err && err.message ? err.message : err.code));
+        #     }, { enableHighAccuracy:true, timeout:15000 });
+        # });
+        # </script>
+        # """
+        # st.components.v1.html(detect_html, height=48)
 
         photo = st.file_uploader("Attach Photo (optional)", type=["jpg","jpeg","png"], key="ui_photo")
 
