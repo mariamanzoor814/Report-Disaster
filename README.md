@@ -35,6 +35,9 @@ All reports appear in real time on a shared interactive map using Firebase Fires
 
 ---
 
+## Showcase
+
+
 ## 🧩 Project Structure
 app.py # Main Streamlit app
 firebase-messaging-sw.js # Push notification service worker
