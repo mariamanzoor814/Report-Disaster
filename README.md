@@ -37,6 +37,10 @@ All reports appear in real time on a shared interactive map using Firebase Fires
 
 ## Showcase
 
+<img width="1896" height="949" alt="image" src="https://github.com/user-attachments/assets/79ed005f-a663-4b00-92fd-8321270dc253" />
+<img width="1920" height="954" alt="image" src="https://github.com/user-attachments/assets/7a8f29a8-dcb8-4ebf-8e45-c9aa7ffb7e77" />
+<img width="1920" height="951" alt="image" src="https://github.com/user-attachments/assets/1b10e47f-e0c8-45e5-a03d-4ba97d642b87" />
+
 
 ## 🧩 Project Structure
 app.py # Main Streamlit app
